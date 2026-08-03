@@ -15,7 +15,7 @@ NICKNAME_RE = re.compile(r"^[A-Za-z0-9_-]{1,32}$")
 FIELDS = [
     "nickname", "saved_at", "birth_date", "birth_time",
     "latitude", "longitude", "timezone", "location_label",
-    "chart_type", "email",
+    "chart_type", "house_system", "email",
 ]
 
 

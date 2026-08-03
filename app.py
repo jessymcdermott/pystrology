@@ -1,8 +1,12 @@
+from datetime import date
+
+import anthropic
 import requests
 from flask import Flask, render_template, jsonify, request
 from dotenv import load_dotenv
 
 from src.astrology import chart as astrology_chart
+from src.astrology import horoscope as astrology_horoscope
 from src.astrology import storage as astrology_storage
 
 load_dotenv()
@@ -30,12 +34,13 @@ def astrology_calculate():
     if chart_type == "in_depth" and not data.get("email"):
         return jsonify({"error": "An email is required for an in-depth chart."}), 400
 
+    house_system = data.get("house_system") or "whole_sign"
     try:
         latitude = float(data["latitude"])
         longitude = float(data["longitude"])
         tz_name = data["timezone"]
         result = astrology_chart.calculate_chart(
-            data["birth_date"], data["birth_time"], latitude, longitude, tz_name, chart_type
+            data["birth_date"], data["birth_time"], latitude, longitude, tz_name, chart_type, house_system
         )
     except (ValueError, KeyError) as e:
         return jsonify({"error": f"Invalid input: {e}"}), 400
@@ -52,6 +57,7 @@ def astrology_calculate():
                 "timezone": tz_name,
                 "location_label": data.get("location_label", ""),
                 "chart_type": chart_type,
+                "house_system": house_system,
                 "email": data.get("email", "") if chart_type == "in_depth" else "",
             })
         except astrology_storage.InvalidNickname as e:
@@ -75,7 +81,7 @@ def astrology_saved(nickname):
         result = astrology_chart.calculate_chart(
             record["birth_date"], record["birth_time"],
             float(record["latitude"]), float(record["longitude"]), record["timezone"],
-            record.get("chart_type", "basic"),
+            record.get("chart_type", "basic"), record.get("house_system") or "whole_sign",
         )
     except (ValueError, KeyError) as e:
         return jsonify({"error": f"Saved record is corrupt: {e}"}), 500
@@ -103,7 +109,7 @@ def astrology_transits(nickname):
         natal = astrology_chart.calculate_chart(
             record["birth_date"], record["birth_time"],
             float(record["latitude"]), float(record["longitude"]), record["timezone"],
-            "in_depth",
+            "in_depth", record.get("house_system") or "whole_sign",
         )
         natal_cusps = [c["longitude"] for c in natal["houses"]["cusps"]]
         transits = astrology_chart.calculate_transits(natal["planets"], natal_cusps)
@@ -112,6 +118,50 @@ def astrology_transits(nickname):
 
     transits["nickname"] = record["nickname"]
     return jsonify(transits)
+
+
+# Daily horoscope: today's transits interpreted by Claude against a saved
+# in-depth chart. Cached one-per-nickname-per-day so repeat visits don't
+# re-generate (and re-bill) the same reading.
+@app.route("/api/astrology/horoscope/<nickname>")
+def astrology_horoscope_route(nickname):
+    try:
+        record = astrology_storage.load_record(nickname)
+    except astrology_storage.InvalidNickname as e:
+        return jsonify({"error": str(e)}), 400
+
+    if not record:
+        return jsonify({"error": "No saved chart for that nickname."}), 404
+
+    if record.get("chart_type") != "in_depth":
+        return jsonify({"error": "Daily horoscopes require a saved in-depth chart."}), 400
+
+    today = date.today().isoformat()
+    cached = astrology_horoscope.get_cached_horoscope(nickname, today)
+    if cached:
+        return jsonify({**cached, "date": today, "nickname": nickname, "cached": True})
+
+    try:
+        house_system = record.get("house_system") or "whole_sign"
+        natal = astrology_chart.calculate_chart(
+            record["birth_date"], record["birth_time"],
+            float(record["latitude"]), float(record["longitude"]), record["timezone"],
+            "in_depth", house_system,
+        )
+        natal_cusps = [c["longitude"] for c in natal["houses"]["cusps"]]
+        transits = astrology_chart.calculate_transits(natal["planets"], natal_cusps)
+    except (ValueError, KeyError) as e:
+        return jsonify({"error": f"Could not compute today's transits: {e}"}), 500
+
+    try:
+        horoscope = astrology_horoscope.generate_horoscope(nickname, natal, transits, house_system)
+    except RuntimeError as e:
+        return jsonify({"error": str(e)}), 502
+    except anthropic.APIError as e:
+        return jsonify({"error": f"Anthropic API error: {e}"}), 502
+
+    astrology_horoscope.save_cached_horoscope(nickname, today, horoscope)
+    return jsonify({**horoscope, "date": today, "nickname": nickname, "cached": False})
 
 
 # Geocode a free-text location into lat/lon/timezone candidates

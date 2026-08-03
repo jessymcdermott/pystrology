@@ -95,8 +95,12 @@ def calculate_planets(jd_ut):
     return planets
 
 
-def calculate_houses(jd_ut, latitude, longitude):
-    cusps, ascmc = swe.houses(jd_ut, latitude, longitude, b"P")
+HOUSE_SYSTEMS = {"whole_sign": b"W", "placidus": b"P"}
+
+
+def calculate_houses(jd_ut, latitude, longitude, house_system="whole_sign"):
+    hsys = HOUSE_SYSTEMS.get(house_system, HOUSE_SYSTEMS["whole_sign"])
+    cusps, ascmc = swe.houses(jd_ut, latitude, longitude, hsys)
     houses = [_sign_position(c) for c in cusps]
     return {
         "cusps": houses,
@@ -141,15 +145,16 @@ def calculate_cross_aspects(set_a, set_b):
     return _find_aspects(pairs)
 
 
-def calculate_chart(birth_date, birth_time, latitude, longitude, tz_name, chart_type="basic"):
+def calculate_chart(birth_date, birth_time, latitude, longitude, tz_name, chart_type="basic", house_system="whole_sign"):
     """Returns a dict describing the natal chart.
 
     chart_type "basic" returns just Sun/Moon/Rising.
     chart_type "in_depth" returns full planets, houses, and aspects.
+    house_system "whole_sign" (default) or "placidus".
     """
     jd_ut = _julian_day_ut(birth_date, birth_time, tz_name)
     planets = calculate_planets(jd_ut)
-    house_data, cusps = calculate_houses(jd_ut, latitude, longitude)
+    house_data, cusps = calculate_houses(jd_ut, latitude, longitude, house_system)
 
     if chart_type != "in_depth":
         return {

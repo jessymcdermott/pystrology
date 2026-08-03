@@ -263,6 +263,17 @@
       margin-bottom: 16px;
     }
 
+    .astro-heading {
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--astro-gold);
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      margin: 24px 0 12px;
+    }
+
+    .astro-heading:first-child { margin-top: 0; }
+
     .astro-wheel-card {
       background: radial-gradient(circle at 50% 42%, rgba(177,140,255,0.06), transparent 65%), var(--surface);
       display: flex;
@@ -477,6 +488,13 @@
             <option value="in_depth">In-Depth (full chart)</option>
           </select>
         </div>
+        <div>
+          <label>House System</label>
+          <select id="astro-house-system">
+            <option value="whole_sign">Whole Sign</option>
+            <option value="placidus">Placidus</option>
+          </select>
+        </div>
         <div id="astro-email-wrap" style="display:none">
           <label>Email (required for in-depth)</label>
           <input type="email" id="astro-email" placeholder="you@example.com" />
@@ -520,6 +538,7 @@
           <input type="text" id="astro-load-nickname" placeholder="nickname to load" />
           <button class="btn btn-ghost" onclick="loadSavedAstrology()">Load Saved</button>
           <button class="btn btn-ghost" onclick="loadAstrologyTransits()">Current Transits</button>
+          <button class="btn btn-ghost" onclick="loadDailyHoroscope()">Daily Horoscope</button>
         </div>
       </div>
     </div>
@@ -819,6 +838,7 @@
         timezone: document.getElementById("astro-tz").value,
         location_label: document.getElementById("astro-location").value,
         chart_type: chartType,
+        house_system: document.getElementById("astro-house-system").value,
         email: document.getElementById("astro-email").value,
       };
 
@@ -872,6 +892,58 @@
 
       if (data.error) { setContent("astro-content", errorHTML(data.error)); return; }
       setContent("astro-content", transitsHTML(data));
+    }
+
+    function horoscopeHTML(data) {
+      const sectionsHTML = data.sections.map(s => `
+        <div class="astro-planet-row">
+          <div class="astro-glyph-badge">${PLANET_GLYPHS[s.planet] || s.planet[0]}</div>
+          <div style="flex:1">
+            <div class="astro-planet-title">${s.title}<span class="sub">${s.transit}</span></div>
+            <div class="astro-planet-text">${s.body}</div>
+          </div>
+        </div>
+      `).join("");
+
+      return `
+        <div class="astro-headline">
+          <div class="astro-headline-cell" style="grid-column: 1 / -1; text-align:left">
+            <div class="label">${data.date}${data.cached ? " · cached" : ""}</div>
+            <div class="value" style="font-size:18px;margin-top:8px">${data.headline}</div>
+          </div>
+        </div>
+        <div class="astro-card"><div class="astro-planet-text" style="padding:16px 20px">${data.overall_energy}</div></div>
+
+        <div class="astro-heading">Today's Transits</div>
+        <div class="astro-card">${sectionsHTML}</div>
+
+        <div class="astro-heading">Watch Out / Best For</div>
+        <div class="astro-headline">
+          <div class="astro-headline-cell" style="text-align:left">
+            <div class="label">Watch Out</div>
+            <div class="astro-planet-text" style="margin-top:8px">${data.watch_out}</div>
+          </div>
+          <div class="astro-headline-cell" style="text-align:left">
+            <div class="label">Best For</div>
+            <div class="astro-planet-text" style="margin-top:8px">${data.best_for}</div>
+          </div>
+        </div>
+
+        <div class="astro-heading">The Full Picture</div>
+        <div class="astro-card"><div class="astro-planet-text" style="padding:16px 20px">${data.summary}</div></div>
+      `;
+    }
+
+    async function loadDailyHoroscope() {
+      const nickname = document.getElementById("astro-load-nickname").value.trim();
+      if (!nickname) return;
+      setContent("astro-content", `<div class="loading"><div class="spinner"></div> Reading today's transits and writing your horoscope — this can take a bit…</div>`);
+
+      const res = await fetch(`/api/astrology/horoscope/${encodeURIComponent(nickname)}`);
+      const data = await res.json();
+
+      if (data.error) { setContent("astro-content", errorHTML(data.error)); return; }
+      setContent("astro-content", horoscopeHTML(data));
     }
   </script>
 </body>
